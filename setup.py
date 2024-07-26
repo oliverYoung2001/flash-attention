@@ -33,6 +33,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
 PACKAGE_NAME = "flash_attn"
+PACKAGE_NAME = "flash_attn_burst"
 
 BASE_WHEEL_URL = (
     "https://github.com/Dao-AILab/flash-attention/releases/download/{tag_name}/{wheel_name}"
