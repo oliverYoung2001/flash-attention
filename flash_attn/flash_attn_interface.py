@@ -10,7 +10,7 @@ import torch.nn as nn
 import flash_attn_2_cuda as flash_attn_cuda
 
 # isort: on
-
+import numpy as np
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
@@ -44,7 +44,7 @@ def _get_block_size_n(device, head_dim, is_dropout, is_causal):
 
 
 def _flash_attn_forward(
-    q, k, v, dropout_p, softmax_scale, causal, window_size, alibi_slopes, return_softmax
+    q, k, v, dropout_p, softmax_scale, causal, window_size, alibi_slopes, return_softmax, out: Optional[torch.Tensor] = None
 ):
     maybe_contiguous = lambda x: x.contiguous() if x.stride(-1) != 1 else x
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
@@ -52,7 +52,7 @@ def _flash_attn_forward(
         q,
         k,
         v,
-        None,
+        out,
         alibi_slopes,
         dropout_p,
         softmax_scale,
@@ -128,11 +128,34 @@ def _flash_attn_backward(
     rng_state=None,
     softmax_d=None,
 ):
+    """
+    [NOTE]: demand: Q, dO, D, lse, K, V, dQ, dK, dV all are contiguous with each other in memory layout !!!
+    """
+    # for x in (dout, q, k, v, out, softmax_lse, dq, dk, dv, softmax_d):
+    #     assert x.is_contiguous()
     maybe_contiguous = lambda x: x.contiguous() if x.stride(-1) != 1 else x
     # dq, dk, dv are allocated by us so they should already be contiguous
     dout, q, k, v, out = [maybe_contiguous(x) for x in (dout, q, k, v, out)]
     if softmax_d is not None:
         softmax_d = maybe_contiguous(softmax_d)
+    # if torch.distributed.is_initialized():
+    #     rank = torch.distributed.get_rank()
+    # else:
+    #     rank = 0
+    # # print(f'rank{rank}, qkvodo, sm_lse/d, dqkv: {q.shape}, {k.shape}, {v.shape}, {out.shape}, {dout.shape}, '
+    # #       f'{softmax_lse.shape}, {softmax_d.shape}, {dq.shape}, {dk.shape}, {dv.shape}', flush=True)
+    # data_ptrs = []
+    # data_sizes = []
+    # for x in (q, out, dout, softmax_d, softmax_lse, k, v, dq, dk, dv):
+    #     data_ptrs.append(x.data_ptr())
+    #     data_sizes.append(x.numel() * x.element_size())
+    # data_ptrs = np.array(data_ptrs)
+    # data_sizes = np.array(data_sizes)
+    # if rank == 0:
+    #     np.set_printoptions(linewidth=np.inf)
+    #     print(f'data_ptrs: {data_ptrs}', flush=True)
+    #     print(f'data_sizes: {data_sizes}', flush=True)
+    #     print(f'end_ptrs: {data_ptrs + data_sizes}', flush=True)
     dq, dk, dv, softmax_d, = flash_attn_cuda.bwd(
         dout,
         q,
